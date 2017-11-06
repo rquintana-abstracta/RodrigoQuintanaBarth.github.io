@@ -1,0 +1,513 @@
+---
+title: "Machine Learning Final Project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## BACKGROUND
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways (labeled A,B,C,D and E). We`ll build a model to predict in which manner they were doing the exercice based on variables from the main dataset.
+
+## UNDERSTANDING THE PROBLEM
+
+As the values to predict are categorical or "factors" in R terms, this is a classification problem.
+
+The outcome of this report will explain:
+
+* How the classification model was built. 
+* How cross validation was used. 
+* What is the expected out of sample error.
+* Why we made each choice.
+
+## EXPLORATORY WORK
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, eval=FALSE}
+
+library(caret)
+library(dplyr)
+library(MASS)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+
+
+```
+
+Our dataset's dimensions are the following
+
+Training set
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+training_set_first = read.csv("./training.csv")
+test_set_first = read.csv("./test.csv")
+
+training_set = training_set_first
+test_set = test_set_first
+dim(training_set_first)
+
+
+```
+
+Test set
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+training_set_first = read.csv("./training.csv")
+test_set_first = read.csv("./test.csv")
+
+training_set = training_set_first
+test_set = test_set_first
+
+dim(test_set_first)
+
+```
+
+Let's have a further look at the variables
+
+Training set variables
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+training_set_first = read.csv("./training.csv")
+test_set_first = read.csv("./test.csv")
+
+training_set = training_set_first
+test_set = test_set_first
+names(training_set_first)
+
+
+```
+
+
+To get a glance on the type of information that each variable provides, let's make a summary of them
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+training_set_first = read.csv("./training.csv")
+test_set_first = read.csv("./test.csv")
+
+training_set = training_set_first
+test_set = test_set_first
+summary(training_set)
+
+```
+
+From this step it becomes clear that not every variable appear to have potentially strong predictive power. The first group of variables provide no useful information for predicting activities. Basically from X to new_window
+
+Apart from that, there are a lot of variables with NAs and #DIV/0! errors, thus making them irrelevant to use to build a predictive model
+
+## DATA CLEANING
+
+Before using the datasets to train models, we need to get rid of irrelevant and incomplete data discovered in the previous analysis.
+
+This basically means not using variables with NA variables and observations with errors, apart from getting rid of variables containing complete data that do not provide useful insight for classification of activities, such as the first group of variables
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, eval=FALSE}
+
+#Getting rid of irrelevant features
+
+training_set_first = read.csv("./training.csv")
+test_set_first = read.csv("./test.csv")
+
+training_set = training_set_first
+test_set = test_set_first
+
+training_set = dplyr::select(training_set,-(X:new_window))
+test_set = dplyr::select(test_set,-(X:new_window))
+
+# Getting rid of features with NAs
+
+training_set = training_set[ , colSums(is.na(training_set)) == 0]
+test_set = test_set[ , colSums(is.na(test_set)) == 0]
+
+# Getting rid of factor variables, except for the activities, as they are not present
+# in the test set and after further examination,hey add no useful information
+
+
+activities <- training_set$classe
+clean_training = training_set[,-grep("factor",sapply(training_set,class))]
+
+clean_training$classe <- activities
+
+
+```
+
+## DESIGN STUDY
+
+In order to estimate out of sample error and to perform cross validation, and considering our test set does not contain a classe variable, a further partion of the main training set into a pure training and a test set will be necessary. The model will be trained using pure training data, and will be validated, with the corresponding error estimates, using the test set.
+
+We'll use random sampling from the main training set to make sure no extra bias is introduced in the analysis by the selection itself. An 80 (train)/20 (test) proportion will be used. Too much data devoted to validation will leave us with a smaller sample to train our model, resulting in higher bias on the estimates. Conversely, too much data devoted to training the model increases the risk of ending up with a model that overfits its training data and performs poorly on unseen sets.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, eval=FALSE}
+
+# Creating partitions for cross validation and estimation of out of sample
+# error, as our test data does not include an activity label to use that
+# dataset for error estimating purposes
+
+training_obs = createDataPartition(clean_training$classe, p = 0.8,list = FALSE)
+pure_training = clean_training[training_obs,]
+testing_dataset = clean_training[-training_obs,]
+
+
+```
+
+## BUILDING MODELS
+
+Considering our problem is of classification and our variable number is moderate, at first glance, tree based algorithms could be a nice choice. Firstly, they are more interpretable (as getting insight from the problem is as important as getting a precise prediction), they evaluate what variables are more important for splitting the data in homogeneuos groups and can decide to not use variables that provides little information to make a decision.
+
+Among them, rpart trees are among the most interpretable. That's why this is the first model we try to fit
+
+### RPart tree
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(caret)
+library(dplyr)
+library(MASS)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+
+
+matrizCorrelaciones = function(data) {
+  
+  
+  matriz = matrix(ncol = length(data),nrow = length(data))
+  
+  for( i in 1:length(data)) {
+    
+    for (j in 1:length(data)) {
+      
+      matriz[i,j] = cor(data[,j],data[,i])
+      
+    }
+    
+  } 
+  
+  colnames(matriz) =  names(data)
+  rownames(matriz) = names(data)
+  
+  return(matriz)  
+  
+}
+
+
+
+if(!file.exists("./training.csv")) {
+
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",destfile = "./training.csv")
+
+}
+
+if(!file.exists("./test.csv")) {
+  
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",destfile = "./test.csv")
+
+}
+#Getting rid of irrelevant features
+
+training_set_first = read.csv("./training.csv")
+test_set_first = read.csv("./test.csv")
+
+training_set = training_set_first
+test_set = test_set_first
+
+training_set = dplyr::select(training_set,-(X:new_window))
+test_set = dplyr::select(test_set,-(X:new_window))
+
+# Getting rid of features with NAs
+
+training_set = training_set[ , colSums(is.na(training_set)) == 0]
+test_set = test_set[ , colSums(is.na(test_set)) == 0]
+
+# Getting rid of factor variables, except for the activities, as they are not present
+# in the test set and after further examination,hey add no useful information
+
+
+activities <- training_set$classe
+clean_training = training_set[,-grep("factor",sapply(training_set,class))]
+
+clean_training$classe <- activities
+
+
+# Creating partitions for cross validation and estimation of out of sample
+# error, as our test data does not include an activity label to use that
+# dataset for error estimating purposes
+
+training_obs = createDataPartition(clean_training$classe, p = 0.8,list = FALSE)
+pure_training = clean_training[training_obs,]
+testing_dataset = clean_training[-training_obs,]
+
+# Model creation
+
+
+model_rpart = train(classe ~ .,na.action = na.omit,data = pure_training,method = "rpart")
+
+rpart.plot(model_rpart$finalModel)
+
+# Predicting with both models
+
+
+predict_rpart = predict(model_rpart,newdata = testing_dataset)
+
+# Evaluating errors
+
+
+confmatrix_rpart = confusionMatrix(predict_rpart,reference = testing_dataset$classe)
+
+confmatrix_rpart
+
+
+```
+
+
+
+
+Although incredibly clear and easy to interpret, the model performs only reasonably well on predicting activity A, it is unable to predict activity D and has an overall accuracy of 50%, which is no better than flipping a coin.
+
+### Random Forest
+
+Every algorithm based on Bagging is proven to produce models with similar bias than their non-bagging based counterparts but reduced variance. In this particular case, the random forest algorithm grows trees using random combinations of observation and variables and then averaging the results to build the final model.
+
+When tried on our training set and using our validation set to test for accuracy, these are the results
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(caret)
+library(dplyr)
+library(MASS)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+
+
+matrizCorrelaciones = function(data) {
+  
+  
+  matriz = matrix(ncol = length(data),nrow = length(data))
+  
+  for( i in 1:length(data)) {
+    
+    for (j in 1:length(data)) {
+      
+      matriz[i,j] = cor(data[,j],data[,i])
+      
+    }
+    
+  } 
+  
+  colnames(matriz) =  names(data)
+  rownames(matriz) = names(data)
+  
+  return(matriz)  
+  
+}
+
+
+
+if(!file.exists("./training.csv")) {
+
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",destfile = "./training.csv")
+
+}
+
+if(!file.exists("./test.csv")) {
+  
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",destfile = "./test.csv")
+
+}
+#Getting rid of irrelevant features
+
+training_set_first = read.csv("./training.csv")
+test_set_first = read.csv("./test.csv")
+
+training_set = training_set_first
+test_set = test_set_first
+
+training_set = dplyr::select(training_set,-(X:new_window))
+test_set = dplyr::select(test_set,-(X:new_window))
+
+# Getting rid of features with NAs
+
+training_set = training_set[ , colSums(is.na(training_set)) == 0]
+test_set = test_set[ , colSums(is.na(test_set)) == 0]
+
+# Getting rid of factor variables, except for the activities, as they are not present
+# in the test set and after further examination,hey add no useful information
+
+
+activities <- training_set$classe
+clean_training = training_set[,-grep("factor",sapply(training_set,class))]
+
+clean_training$classe <- activities
+
+
+# Creating partitions for cross validation and estimation of out of sample
+# error, as our test data does not include an activity label to use that
+# dataset for error estimating purposes
+
+training_obs = createDataPartition(clean_training$classe, p = 0.8,list = FALSE)
+pure_training = clean_training[training_obs,]
+testing_dataset = clean_training[-training_obs,]
+
+
+# Model creation
+
+model_rf = randomForest(classe ~ .,na.action = na.omit,data = pure_training)
+
+
+# Predicting with both models
+
+predict_rf = predict(model_rf,newdata = testing_dataset)
+
+
+# Evaluating errors
+
+confmatrix_rf = confusionMatrix(predict_rf,reference = testing_dataset$classe)
+
+confmatrix_rf
+
+
+```
+
+From the Confusion Matrix results, the Random Forest model performs very good, with both Accuracty and Kappa levels above 99%
+
+Typically, in order to get better accuracy we could Ensamble both of our models and average their predictions, at the expense of interpretability. In this case, such a procedure does not appear to be needed, given the great predictive power of our last model.
+
+#### Code for building the models
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, eval=FALSE}
+testing_dataset = clean_training[-training_obs,]
+
+# Model creation
+
+model_rf = randomForest(classe ~ .,na.action = na.omit,data = pure_training)
+model_rpart = train(classe ~ .,na.action = na.omit,data = pure_training,method = "rpart")
+
+# Predicting with both models
+
+predict_rf = predict(model_rf,newdata = testing_dataset)
+predict_rpart = predict(model_rpart,newdata = testing_dataset)
+
+# Evaluating errors
+
+confmatrix_rf = confusionMatrix(predict_rf,reference = testing_dataset$classe)
+confmatrix_rpart = confusionMatrix(predict_rpart,reference = testing_dataset$classe)
+
+```
+
+## MODEL SELECTION
+
+Our chosen model will be the Random Forest one, as it greatly outperforms the rpart model and yields an above 99% accuracy on predicted values on a test (out of sample) set, which means we could estimate the out of sample error to be 1 - kappa = 0.32%. Kappa is the prefered messure of accuracy here since it corrects for chance, reducing the impact of miscalculating the accuracy because of differences in the number of instances for each potential classification label on the set where the model was trained.
+
+
+### Using model to predict class in test cases
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, eval=TRUE}
+
+library(caret)
+library(dplyr)
+library(MASS)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+
+
+matrizCorrelaciones = function(data) {
+  
+  
+  matriz = matrix(ncol = length(data),nrow = length(data))
+  
+  for( i in 1:length(data)) {
+    
+    for (j in 1:length(data)) {
+      
+      matriz[i,j] = cor(data[,j],data[,i])
+      
+    }
+    
+  } 
+  
+  colnames(matriz) =  names(data)
+  rownames(matriz) = names(data)
+  
+  return(matriz)  
+  
+}
+
+
+
+if(!file.exists("./training.csv")) {
+
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",destfile = "./training.csv")
+
+}
+
+if(!file.exists("./test.csv")) {
+  
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",destfile = "./test.csv")
+
+}
+#Getting rid of irrelevant features
+
+training_set_first = read.csv("./training.csv")
+test_set_first = read.csv("./test.csv")
+
+training_set = training_set_first
+test_set = test_set_first
+
+training_set = dplyr::select(training_set,-(X:new_window))
+test_set = dplyr::select(test_set,-(X:new_window))
+
+# Getting rid of features with NAs
+
+training_set = training_set[ , colSums(is.na(training_set)) == 0]
+test_set = test_set[ , colSums(is.na(test_set)) == 0]
+
+# Getting rid of factor variables, except for the activities, as they are not present
+# in the test set and after further examination,hey add no useful information
+
+
+activities <- training_set$classe
+clean_training = training_set[,-grep("factor",sapply(training_set,class))]
+
+clean_training$classe <- activities
+
+
+# Creating partitions for cross validation and estimation of out of sample
+# error, as our test data does not include an activity label to use that
+# dataset for error estimating purposes
+
+training_obs = createDataPartition(clean_training$classe, p = 0.8,list = FALSE)
+pure_training = clean_training[training_obs,]
+testing_dataset = clean_training[-training_obs,]
+
+# Model creation
+
+model_rf = randomForest(classe ~ .,na.action = na.omit,data = pure_training)
+model_rpart = train(classe ~ .,na.action = na.omit,data = pure_training,method = "rpart")
+
+# Predicting with both models
+
+predict_rf = predict(model_rf,newdata = testing_dataset)
+predict_rpart = predict(model_rpart,newdata = testing_dataset)
+
+# Evaluating errors
+
+confmatrix_rf = confusionMatrix(predict_rf,reference = testing_dataset$classe)
+confmatrix_rpart = confusionMatrix(predict_rpart,reference = testing_dataset$classe)
+
+
+# Using chosen model to predict test cases
+
+predict_test_cases = predict(model_rf, newdata = test_set)
+
+predict_test_cases
+                  
+
+```
+
